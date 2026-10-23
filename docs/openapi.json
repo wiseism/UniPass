@@ -1,69 +1,2047 @@
 {
   "openapi": "3.1.0",
-  "info": {"title": "UniPass browser and resource API", "version": "0.1.0", "description": "Implemented business endpoints only. OAuth/OIDC endpoints are described by discovery. Browser POST requests require a session cookie, a CSRF token and a canonical single Origin header equal to the IAM origin; shell pages (/login /reset /portal/...) are public no-data HTML behind strict CSP. Password writes are never replayed by the browser; a per-request UUID allows read-only result recovery."},
-  "security": [{"sessionCookie": []}],
+  "info": {
+    "title": "UniPass browser and resource API",
+    "version": "0.1.0",
+    "description": "Implemented business endpoints only. OAuth/OIDC endpoints are described by discovery. Browser POST requests require a session cookie, a CSRF token and a canonical single Origin header equal to the IAM origin; shell pages (/login /reset /portal/...) are public no-data HTML behind strict CSP. Password writes are never replayed by the browser; a per-request UUID allows read-only result recovery."
+  },
+  "security": [
+    {
+      "sessionCookie": []
+    }
+  ],
   "paths": {
-    "/api/session/logins": {"get": {"operationId": "listOwnLogins", "description": "Owner-scoped durable login records, including logins whose RP grants may outlive their browser cookie. No raw servlet session IDs, credentials, IPs or User-Agent strings. Ordered by login time and ID descending; at most 50 entries. lastAccessAt is browser activity sampled at most once per minute. The current entry may occur on a later page.", "parameters": [{"name": "before", "in": "query", "schema": {"type": "string", "format": "uuid"}, "description": "Owned login ID returned as nextCursor; a foreign or missing cursor yields 404."}], "responses": {"200": {"description": "Page of login records", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/LoginPage"}}}}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/session/logins/{id}/revoke": {"post": {"operationId": "revokeOwnLogin", "description": "Requires recent real password, MFA where configured, CSRF and one exact configured IAM Origin. Atomically revokes the login, all its authorization families and enqueues configured backchannel notifications. Other logins retain their epoch and grants. Repeating an owned target is idempotent while the caller remains valid; self-revocation invalidates this browser session. Cookie deletion on another device is unnecessary: every subsequent authenticated request checks PostgreSQL.", "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"$ref": "#/components/parameters/Csrf"}, {"name": "Origin", "in": "header", "required": true, "schema": {"type": "string"}, "description": "Exact IAM issuer origin, e.g. https://iam.example.test; absent, null, multiple or mismatching origins are rejected."}], "responses": {"204": {"description": "Revocation transaction committed"}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/connector/feishu/login/start": {"post": {"operationId": "startFeishuLogin", "security": [], "description": "Anonymous browser with CSRF from /api/public/csrf. Requires enabled, verified fixed app/tenant. Returns five-minute browser-bound state and S256 authorization URL; platform tokens are never returned. Already authenticated users must use binding/start.", "parameters": [{"$ref": "#/components/parameters/Csrf"}], "responses": {"200": {"$ref": "#/components/responses/FeishuStart"}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/connector/feishu/binding/start": {"post": {"operationId": "startFeishuBinding", "description": "Requires recent real directory password and current MFA where required, without forced-password-change or factor-recovery gates. Callback must retain this user, epoch and browser session. Same external identity may explicitly renew bound_epoch; identity replacement requires unlink first.", "parameters": [{"$ref": "#/components/parameters/Csrf"}], "responses": {"200": {"$ref": "#/components/responses/FeishuStart"}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/connector/feishu/binding/remove": {"post": {"operationId": "removeFeishuBinding", "description": "Requires recent password and current MFA where required. Removes this user's binding and fences existing credentials via auth_epoch. Does not log out the Feishu client.", "parameters": [{"$ref": "#/components/parameters/Csrf"}], "responses": {"200": {"description": "Explicit binding removal completed", "content": {"application/json": {"schema": {"type": "object", "required": ["reauthentication_required"], "properties": {"reauthentication_required": {"type": "boolean", "const": true}}}}}}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/connector/feishu/callback": {"get": {"operationId": "completeFeishuAuthorization", "security": [], "description": "Fixed registered HTTPS IAM callback; requires original browser cookie. Exactly one code or error with state. Duplicate and unknown query parameters rejected. State and code are consumed before external exchange, with no automatic retries. Explicit binding returns bound=true; login rotates session ID and returns authenticated=true. FEISHU authentication alone supplies no password/MFA proof.", "parameters": [{"in": "query", "name": "state", "required": true, "schema": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43}$"}}, {"in": "query", "name": "code", "schema": {"type": "string", "minLength": 1, "maxLength": 2048}}, {"in": "query", "name": "error", "schema": {"type": "string"}}], "responses": {"200": {"description": "One-time flow completed; no platform token", "content": {"application/json": {"schema": {"oneOf": [{"type": "object", "required": ["authenticated"], "properties": {"authenticated": {"type": "boolean", "const": true}}}, {"type": "object", "required": ["bound"], "properties": {"bound": {"type": "boolean", "const": true}}}]}}}}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/session/reauthenticate": {"post": {"operationId": "reauthenticatePassword", "description": "Verify the current session owner's directory password. Rotates session ID and updates password proof without extending original login lifetime, changing identity/epoch or clearing recovery gates. Uses shared login rate limits; federated identity and OTP alone do not count as password proof.", "parameters": [{"$ref": "#/components/parameters/Csrf"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["password"], "properties": {"password": {"type": "string", "minLength": 1, "maxLength": 1024, "writeOnly": true}}}}}}, "responses": {"200": {"description": "Password verified; session identifier rotated", "content": {"application/json": {"schema": {"type": "object", "required": ["verified"], "properties": {"verified": {"type": "boolean", "const": true}}}}}}, "401": {"$ref": "#/components/responses/Rejected"}, "403": {"$ref": "#/components/responses/Rejected"}, "429": {"$ref": "#/components/responses/Rejected"}, "503": {"$ref": "#/components/responses/Rejected"}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/mfa/rotation": {"post": {"operationId": "startFactorRotation", "description": "Recent password and current MFA required. Leaves the active factor in place until the new factor is confirmed. Pending change is bound to this browser.", "parameters": [{"$ref": "#/components/parameters/Csrf"}], "responses": {"200": {"description": "Sensitive, one-time five-minute replacement enrollment", "content": {"application/json": {"schema": {"type": "object", "required": ["id", "secret", "otpauthUri", "expiresAt"], "properties": {"id": {"type": "string", "format": "uuid"}, "secret": {"type": "string", "description": "Sensitive Base32 factor secret, displayed once"}, "otpauthUri": {"type": "string", "format": "uri"}, "expiresAt": {"type": "string", "format": "date-time"}}}}}}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/mfa/recovery": {"post": {"operationId": "redeemFactorRecoveryGrant", "description": "Recent password login and a target-bound, one-use administrator capability are required. Issuer authority and epoch are checked again.", "parameters": [{"$ref": "#/components/parameters/Csrf"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["recovery_token"], "properties": {"recovery_token": {"$ref": "#/components/schemas/RecoveryToken"}}}}}}, "responses": {"200": {"description": "Consumes the recovery capability and creates a browser-bound replacement; token issuance remains blocked until confirmation", "content": {"application/json": {"schema": {"type": "object", "required": ["id", "secret", "otpauthUri", "expiresAt"], "properties": {"id": {"type": "string", "format": "uuid"}, "secret": {"type": "string", "description": "Sensitive Base32 factor secret, displayed once"}, "otpauthUri": {"type": "string", "format": "uri"}, "expiresAt": {"type": "string", "format": "date-time"}}}}}}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/mfa/changes/{id}/confirm": {"post": {"operationId": "confirmFactorReplacement", "parameters": [{"$ref": "#/components/parameters/OperationId"}, {"$ref": "#/components/parameters/Csrf"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["code"], "properties": {"code": {"$ref": "#/components/schemas/Otp"}}}}}}, "responses": {"200": {"description": "Replaces the factor atomically, revokes families and increments epoch; fresh password login and MFA are required", "content": {"application/json": {"schema": {"type": "object", "required": ["reauthentication_required"], "properties": {"reauthentication_required": {"type": "boolean", "const": true}}}}}}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/mfa/changes/{id}/cancel": {"post": {"operationId": "cancelFactorReplacement", "description": "Cancels only this browser-owned pending change. Cancelling recovery never removes the recovery-required gate.", "parameters": [{"$ref": "#/components/parameters/OperationId"}, {"$ref": "#/components/parameters/Csrf"}], "responses": {"200": {"description": "Pending secret erased", "content": {"application/json": {"schema": {"type": "object", "required": ["cancelled"], "properties": {"cancelled": {"type": "boolean", "const": true}}}}}}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/admin/mfa/users/{id}/recovery": {"post": {"operationId": "authorizeFactorRecovery", "description": "Live ROLE_ADMIN_MFA_RECOVERY plus recent password/MFA. Self-recovery is forbidden. Operator must independently verify identity and hand off the returned capability through a trusted channel. Repeating the same key returns token=null; changed reason/evidence conflicts.", "parameters": [{"$ref": "#/components/parameters/OperationId"}, {"$ref": "#/components/parameters/Csrf"}, {"$ref": "#/components/parameters/Idempotency"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["reason", "evidence_ref"], "properties": {"reason": {"type": "string", "minLength": 1, "maxLength": 500}, "evidence_ref": {"type": "string", "pattern": "^[A-Za-z0-9:/_.-]{8,500}$"}}}}}}, "responses": {"200": {"description": "Old factor retired, epoch incremented, token families revoked, MFA recovery required; capability expires in fifteen minutes", "content": {"application/json": {"schema": {"type": "object", "required": ["id", "token", "expiresAt"], "properties": {"id": {"type": "string", "format": "uuid"}, "token": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9_-]{43}$", "description": "Raw capability returned once; never log or put in a URL"}, "expiresAt": {"type": "string", "format": "date-time"}}}}}}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/public/csrf": {"get": {"operationId": "anonymousCsrf", "security": [], "responses": {"200": {"description": "Establishes an anonymous browser session and returns header_name/token for recovery POST requests", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CsrfProof"}}}}, "default": {"$ref": "#/components/responses/Rejected"}}, "description": "Establishes an anonymous browser session and returns header_name/parameter_name/token. Unsafe browser requests additionally require a canonical single Origin equal to the IAM origin; protocol endpoints such as /oauth/token remain app-to-app."}},
-    "/api/password/reset/request": {"post": {"operationId": "requestPasswordRecovery", "description": "Uniform acceptance for known, unknown and rate-limited identities. Recipient comes from a verified roster; no address is accepted in the request.", "parameters": [{"$ref": "#/components/parameters/Csrf"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["employee_no"], "properties": {"employee_no": {"type": "string", "minLength": 1, "maxLength": 100}}}}}}, "responses": {"202": {"description": "Accepted; does not disclose account existence or delivery status"}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/password/reset/verify": {"post": {"operationId": "verifyRecoveryEmail", "description": "Consumes an email proof exactly once. GET never consumes it. Returned grant is bound to this browser session.", "parameters": [{"$ref": "#/components/parameters/Csrf"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["token"], "properties": {"token": {"$ref": "#/components/schemas/RecoveryToken"}}}}}}, "responses": {"200": {"description": "One-time ten-minute grant", "content": {"application/json": {"schema": {"type": "object", "required": ["reset_token", "expires_at"], "properties": {"reset_token": {"$ref": "#/components/schemas/RecoveryToken"}, "expires_at": {"type": "string", "format": "date-time"}}}}}}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/password/reset/confirm": {"post": {"operationId": "confirmPasswordReset", "parameters": [{"$ref": "#/components/parameters/Csrf"}, {"$ref": "#/components/parameters/Idempotency"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/NewPassword"}, {"type": "object", "required": ["reset_token"], "properties": {"reset_token": {"$ref": "#/components/schemas/RecoveryToken"}}}]}}}}, "responses": {"200": {"$ref": "#/components/responses/PasswordOperation"}, "202": {"$ref": "#/components/responses/PasswordOperation"}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/password/reset/operations/{id}": {"get": {"operationId": "browserRecoveryOperation", "description": "Requires the verifying browser's recovery capability; never trusts an existing login identity.", "parameters": [{"$ref": "#/components/parameters/OperationId"}], "responses": {"200": {"$ref": "#/components/responses/PasswordOperation"}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/admin/password/users/{id}/reset": {"post": {"operationId": "administrativePasswordReset", "description": "Requires live ROLE_ADMIN_PASSWORD_RESET, recent password authentication and recent MFA; forces target's next password change.", "parameters": [{"$ref": "#/components/parameters/OperationId"}, {"$ref": "#/components/parameters/Csrf"}, {"$ref": "#/components/parameters/Idempotency"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/NewPassword"}, {"type": "object", "required": ["reason"], "properties": {"reason": {"type": "string", "minLength": 1, "maxLength": 500}}}]}}}}, "responses": {"200": {"$ref": "#/components/responses/PasswordOperation"}, "202": {"$ref": "#/components/responses/PasswordOperation"}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/admin/password/operations/{id}/recover": {"post": {"operationId": "recoverAmbiguousPasswordOperation", "description": "Requires live ROLE_ADMIN_PASSWORD_RECOVERY, recent password/MFA, UNKNOWN state, expired lease and reviewed external evidence.", "parameters": [{"$ref": "#/components/parameters/OperationId"}, {"$ref": "#/components/parameters/Csrf"}, {"$ref": "#/components/parameters/Idempotency"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["confirmed_committed", "reason", "evidence_ref"], "properties": {"confirmed_committed": {"type": "boolean"}, "reason": {"type": "string", "minLength": 1, "maxLength": 500}, "evidence_ref": {"type": "string", "pattern": "^[a-zA-Z0-9:/_.-]{8,500}$"}}}}}}, "responses": {"200": {"$ref": "#/components/responses/PasswordOperation"}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/admin/password/operations/{id}": {"get": {"operationId": "administrativePasswordOperation", "description": "Requires a live password management role and recent MFA.", "parameters": [{"$ref": "#/components/parameters/OperationId"}], "responses": {"200": {"$ref": "#/components/responses/PasswordOperation"}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/session/me": {"get": {"operationId": "sessionIdentity", "responses": {"200": {"description": "Current identity", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Identity"}}}}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/session/csrf": {"get": {"operationId": "csrfToken", "responses": {"200": {"description": "CSRF header and token for this browser session", "content": {"application/json": {"schema": {"type": "object", "required": ["header_name", "parameter_name", "token"], "properties": {"header_name": {"type": "string"}, "parameter_name": {"type": "string"}, "token": {"type": "string"}}}}}}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/password/change": {"post": {"operationId": "changeOwnPassword", "description": "Recent password authentication is required. Enrolled users and administrators also require recent MFA. Unknown directory results remain fenced and return 202.", "parameters": [{"$ref": "#/components/parameters/Csrf"}, {"in": "header", "name": "Idempotency-Key", "required": true, "schema": {"type": "string", "pattern": "^[a-zA-Z0-9_-]{16,128}$"}}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["old_password", "new_password", "confirm_password"], "properties": {"old_password": {"$ref": "#/components/schemas/Password"}, "new_password": {"$ref": "#/components/schemas/Password"}, "confirm_password": {"$ref": "#/components/schemas/Password"}}}}}}, "responses": {"200": {"$ref": "#/components/responses/PasswordOperation"}, "202": {"$ref": "#/components/responses/PasswordOperation"}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/password/operations/{id}": {"get": {"operationId": "ownPasswordOperation", "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}], "responses": {"200": {"$ref": "#/components/responses/PasswordOperation"}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/resource/me": {"get": {"operationId": "resourceIdentity", "security": [{"accessBearer": []}], "description": "Requires at+jwt, audience unipass-api, scope api.read and live account epoch/gate/family validation. ID tokens are rejected.", "responses": {"200": {"description": "Bearer identity", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/Identity"}, {"type": "object", "required": ["client_id"], "properties": {"client_id": {"type": "string"}}}]}}}}, "401": {"$ref": "#/components/responses/Rejected"}, "403": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/mfa": {"get": {"operationId": "mfaStatus", "responses": {"200": {"description": "Factor status only", "content": {"application/json": {"schema": {"type": "object", "required": ["enrolled", "required", "recent", "recovery_required"], "properties": {"enrolled": {"type": "boolean"}, "required": {"type": "boolean"}, "recent": {"type": "boolean"}, "recovery_required": {"type": "boolean"}}}}}}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/mfa/enrollment": {"post": {"operationId": "startTotpEnrollment", "parameters": [{"$ref": "#/components/parameters/Csrf"}], "responses": {"200": {"description": "Sensitive, one-time display. Confirmation expires after five minutes.", "content": {"application/json": {"schema": {"type": "object", "required": ["secret", "otpauthUri", "expiresAt"], "properties": {"secret": {"type": "string", "description": "Base32 TOTP secret; never log or persist in the browser"}, "otpauthUri": {"type": "string", "format": "uri"}, "expiresAt": {"type": "string", "format": "date-time"}}}}}}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/mfa/enrollment/confirm": {"post": {"operationId": "confirmTotpEnrollment", "parameters": [{"$ref": "#/components/parameters/Csrf"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["code"], "properties": {"code": {"$ref": "#/components/schemas/Otp"}}}}}}, "responses": {"200": {"description": "Factor enabled and auth_epoch incremented; password reauthentication required", "content": {"application/json": {"schema": {"type": "object", "required": ["reauthentication_required"], "properties": {"reauthentication_required": {"type": "boolean", "const": true}}}}}}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/mfa/context": {"post": {"operationId": "stepUpContext", "parameters": [{"$ref": "#/components/parameters/Csrf"}], "responses": {"200": {"description": "Session-owned step-up context", "content": {"application/json": {"schema": {"type": "object", "required": ["context"], "properties": {"context": {"type": "string", "format": "uuid"}}}}}}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/mfa/challenges": {"post": {"operationId": "createMfaChallenge", "parameters": [{"$ref": "#/components/parameters/Csrf"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["context"], "properties": {"context": {"type": "string", "format": "uuid"}}}}}}, "responses": {"200": {"description": "New five-minute challenge; supersedes previous challenge for this session", "content": {"application/json": {"schema": {"type": "object", "required": ["challenge"], "properties": {"challenge": {"type": "string", "format": "uuid"}}}}}}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/mfa/verify": {"post": {"operationId": "verifyMfaChallenge", "parameters": [{"$ref": "#/components/parameters/Csrf"}], "requestBody": {"required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["context", "challenge", "code"], "properties": {"context": {"type": "string", "format": "uuid"}, "challenge": {"type": "string", "format": "uuid"}, "code": {"$ref": "#/components/schemas/Otp"}}}}}}, "responses": {"200": {"description": "Challenge and time step consumed; browser session ID rotated", "content": {"application/json": {"schema": {"type": "object", "required": ["verified"], "properties": {"verified": {"type": "boolean", "const": true}}}}}}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/password/requests/{key}/operation": {"get": {"operationId": "ownPasswordRequestOperation", "description": "Read-only recovery for a lost password change response. Looks up the never-replayed idempotency key of the original POST; it never resubmits a directory password. Requires an active login and a still-recent real password proof; a revoked login returns 401, a foreign key 404.", "parameters": [{"in": "path", "name": "key", "required": true, "schema": {"type": "string", "format": "uuid"}, "description": "Idempotency-Key UUID used by the original /api/password/change request."}], "responses": {"200": {"$ref": "#/components/responses/PasswordOperation"}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/api/password/reset/requests/{key}/operation": {"get": {"operationId": "resetRequestOperation", "description": "Read-only recovery for a lost reset confirmation response. Bound to the browser session that explicitly verified the email proof and to the RESET operation carrying that key; only GET, no secret in URL or storage.", "parameters": [{"in": "path", "name": "key", "required": true, "schema": {"type": "string", "format": "uuid"}, "description": "Idempotency-Key UUID used by the original /api/password/reset/confirm request."}], "responses": {"200": {"$ref": "#/components/responses/PasswordOperation"}, "default": {"$ref": "#/components/responses/Rejected"}}}},
-    "/portal/continue": {"post": {"operationId": "portalContinue", "description": "Resumes the single validated authorization request stored in the server-written session under a random continuation UUID (10 min expiry, owner-bound). No SavedRequest return URL exists; foreign/expired/consumed continuations reject with 400 or redirect to /portal/?flow_error. Native form POST; CSRF form field plus canonical Origin required.", "requestBody": {"required": true, "content": {"application/x-www-form-urlencoded": {"schema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "format": "uuid"}}}}}}, "responses": {"302": {"description": "Redirect to the remaining page (/portal/mfa, /portal/password, /portal/factors) or to the validated /oauth/authorize?target; anonymous continuation invalidation carries only the target across session replacement, never authentication or MFA proof."}, "default": {"$ref": "#/components/responses/Rejected"}}}}
+    "/api/session/logins": {
+      "get": {
+        "operationId": "listOwnLogins",
+        "description": "Owner-scoped durable login records, including logins whose RP grants may outlive their browser cookie. No raw servlet session IDs, credentials, IPs or User-Agent strings. Ordered by login time and ID descending; at most 50 entries. lastAccessAt is browser activity sampled at most once per minute. The current entry may occur on a later page.",
+        "parameters": [
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Owned login ID returned as nextCursor; a foreign or missing cursor yields 404."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Page of login records",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/session/logins/{id}/revoke": {
+      "post": {
+        "operationId": "revokeOwnLogin",
+        "description": "Requires recent real password, MFA where configured, CSRF and one exact configured IAM Origin. Atomically revokes the login, all its authorization families and enqueues configured backchannel notifications. Other logins retain their epoch and grants. Repeating an owned target is idempotent while the caller remains valid; self-revocation invalidates this browser session. Cookie deletion on another device is unnecessary: every subsequent authenticated request checks PostgreSQL.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Csrf"
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Exact IAM issuer origin, e.g. https://iam.example.test; absent, null, multiple or mismatching origins are rejected."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revocation transaction committed"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/connector/feishu/login/start": {
+      "post": {
+        "operationId": "startFeishuLogin",
+        "security": [],
+        "description": "Anonymous browser with CSRF from /api/public/csrf. Requires enabled, verified fixed app/tenant. Returns five-minute browser-bound state and S256 authorization URL; platform tokens are never returned. Already authenticated users must use binding/start.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Csrf"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/FeishuStart"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/connector/feishu/binding/start": {
+      "post": {
+        "operationId": "startFeishuBinding",
+        "description": "Requires recent real directory password and current MFA where required, without forced-password-change or factor-recovery gates. Callback must retain this user, epoch and browser session. Same external identity may explicitly renew bound_epoch; identity replacement requires unlink first.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Csrf"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/FeishuStart"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/connector/feishu/binding/remove": {
+      "post": {
+        "operationId": "removeFeishuBinding",
+        "description": "Requires recent password and current MFA where required. Removes this user's binding and fences existing credentials via auth_epoch. Does not log out the Feishu client.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Csrf"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Explicit binding removal completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "reauthentication_required"
+                  ],
+                  "properties": {
+                    "reauthentication_required": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/connector/feishu/callback": {
+      "get": {
+        "operationId": "completeFeishuAuthorization",
+        "security": [],
+        "description": "Fixed registered HTTPS IAM callback; requires original browser cookie. Exactly one code or error with state. Duplicate and unknown query parameters rejected. State and code are consumed before external exchange, with no automatic retries. Explicit binding returns bound=true; login rotates session ID and returns authenticated=true. FEISHU authentication alone supplies no password/MFA proof.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{43}$"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          },
+          {
+            "in": "query",
+            "name": "error",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One-time flow completed; no platform token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "authenticated"
+                      ],
+                      "properties": {
+                        "authenticated": {
+                          "type": "boolean",
+                          "const": true
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "bound"
+                      ],
+                      "properties": {
+                        "bound": {
+                          "type": "boolean",
+                          "const": true
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/session/reauthenticate": {
+      "post": {
+        "operationId": "reauthenticatePassword",
+        "description": "Verify the current session owner's directory password. Rotates session ID and updates password proof without extending original login lifetime, changing identity/epoch or clearing recovery gates. Uses shared login rate limits; federated identity and OTP alone do not count as password proof.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Csrf"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "password"
+                ],
+                "properties": {
+                  "password": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024,
+                    "writeOnly": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password verified; session identifier rotated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "verified"
+                  ],
+                  "properties": {
+                    "verified": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Rejected"
+          },
+          "403": {
+            "$ref": "#/components/responses/Rejected"
+          },
+          "429": {
+            "$ref": "#/components/responses/Rejected"
+          },
+          "503": {
+            "$ref": "#/components/responses/Rejected"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/mfa/rotation": {
+      "post": {
+        "operationId": "startFactorRotation",
+        "description": "Recent password and current MFA required. Leaves the active factor in place until the new factor is confirmed. Pending change is bound to this browser.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Csrf"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sensitive, one-time five-minute replacement enrollment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "secret",
+                    "otpauthUri",
+                    "expiresAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "secret": {
+                      "type": "string",
+                      "description": "Sensitive Base32 factor secret, displayed once"
+                    },
+                    "otpauthUri": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/mfa/recovery": {
+      "post": {
+        "operationId": "redeemFactorRecoveryGrant",
+        "description": "Recent password login and a target-bound, one-use administrator capability are required. Issuer authority and epoch are checked again.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Csrf"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "recovery_token"
+                ],
+                "properties": {
+                  "recovery_token": {
+                    "$ref": "#/components/schemas/RecoveryToken"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Consumes the recovery capability and creates a browser-bound replacement; token issuance remains blocked until confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "secret",
+                    "otpauthUri",
+                    "expiresAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "secret": {
+                      "type": "string",
+                      "description": "Sensitive Base32 factor secret, displayed once"
+                    },
+                    "otpauthUri": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/mfa/changes/{id}/confirm": {
+      "post": {
+        "operationId": "confirmFactorReplacement",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OperationId"
+          },
+          {
+            "$ref": "#/components/parameters/Csrf"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "code"
+                ],
+                "properties": {
+                  "code": {
+                    "$ref": "#/components/schemas/Otp"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaces the factor atomically, revokes families and increments epoch; fresh password login and MFA are required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "reauthentication_required"
+                  ],
+                  "properties": {
+                    "reauthentication_required": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/mfa/changes/{id}/cancel": {
+      "post": {
+        "operationId": "cancelFactorReplacement",
+        "description": "Cancels only this browser-owned pending change. Cancelling recovery never removes the recovery-required gate.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OperationId"
+          },
+          {
+            "$ref": "#/components/parameters/Csrf"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pending secret erased",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "cancelled"
+                  ],
+                  "properties": {
+                    "cancelled": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/admin/mfa/users/{id}/recovery": {
+      "post": {
+        "operationId": "authorizeFactorRecovery",
+        "description": "Live ROLE_ADMIN_MFA_RECOVERY plus recent password/MFA. Self-recovery is forbidden. Operator must independently verify identity and hand off the returned capability through a trusted channel. Repeating the same key returns token=null; changed reason/evidence conflicts.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OperationId"
+          },
+          {
+            "$ref": "#/components/parameters/Csrf"
+          },
+          {
+            "$ref": "#/components/parameters/Idempotency"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "reason",
+                  "evidence_ref"
+                ],
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "evidence_ref": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9:/_.-]{8,500}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Old factor retired, epoch incremented, token families revoked, MFA recovery required; capability expires in fifteen minutes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "token",
+                    "expiresAt"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "token": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "pattern": "^[A-Za-z0-9_-]{43}$",
+                      "description": "Raw capability returned once; never log or put in a URL"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/public/csrf": {
+      "get": {
+        "operationId": "anonymousCsrf",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Establishes an anonymous browser session and returns header_name/token for recovery POST requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CsrfProof"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "description": "Establishes an anonymous browser session and returns header_name/parameter_name/token. Unsafe browser requests additionally require a canonical single Origin equal to the IAM origin; protocol endpoints such as /oauth/token remain app-to-app."
+      }
+    },
+    "/api/password/reset/request": {
+      "post": {
+        "operationId": "requestPasswordRecovery",
+        "description": "Uniform acceptance for known, unknown and rate-limited identities. Recipient comes from a verified roster; no address is accepted in the request.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Csrf"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "employee_no"
+                ],
+                "properties": {
+                  "employee_no": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted; does not disclose account existence or delivery status"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/password/reset/verify": {
+      "post": {
+        "operationId": "verifyRecoveryEmail",
+        "description": "Consumes an email proof exactly once. GET never consumes it. Returned grant is bound to this browser session.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Csrf"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "token"
+                ],
+                "properties": {
+                  "token": {
+                    "$ref": "#/components/schemas/RecoveryToken"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One-time ten-minute grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "reset_token",
+                    "expires_at"
+                  ],
+                  "properties": {
+                    "reset_token": {
+                      "$ref": "#/components/schemas/RecoveryToken"
+                    },
+                    "expires_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/password/reset/confirm": {
+      "post": {
+        "operationId": "confirmPasswordReset",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Csrf"
+          },
+          {
+            "$ref": "#/components/parameters/Idempotency"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NewPassword"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "reset_token"
+                    ],
+                    "properties": {
+                      "reset_token": {
+                        "$ref": "#/components/schemas/RecoveryToken"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/PasswordOperation"
+          },
+          "202": {
+            "$ref": "#/components/responses/PasswordOperation"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/password/reset/operations/{id}": {
+      "get": {
+        "operationId": "browserRecoveryOperation",
+        "description": "Requires the verifying browser's recovery capability; never trusts an existing login identity.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OperationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/PasswordOperation"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/admin/password/users/{id}/reset": {
+      "post": {
+        "operationId": "administrativePasswordReset",
+        "description": "Requires live ROLE_ADMIN_PASSWORD_RESET, recent password authentication and recent MFA; forces target's next password change.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OperationId"
+          },
+          {
+            "$ref": "#/components/parameters/Csrf"
+          },
+          {
+            "$ref": "#/components/parameters/Idempotency"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NewPassword"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "reason"
+                    ],
+                    "properties": {
+                      "reason": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/PasswordOperation"
+          },
+          "202": {
+            "$ref": "#/components/responses/PasswordOperation"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/admin/password/operations/{id}/recover": {
+      "post": {
+        "operationId": "recoverAmbiguousPasswordOperation",
+        "description": "Requires live ROLE_ADMIN_PASSWORD_RECOVERY, recent password/MFA, UNKNOWN state, expired lease and reviewed external evidence.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OperationId"
+          },
+          {
+            "$ref": "#/components/parameters/Csrf"
+          },
+          {
+            "$ref": "#/components/parameters/Idempotency"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "confirmed_committed",
+                  "reason",
+                  "evidence_ref"
+                ],
+                "properties": {
+                  "confirmed_committed": {
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "evidence_ref": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z0-9:/_.-]{8,500}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/PasswordOperation"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/admin/password/operations/{id}": {
+      "get": {
+        "operationId": "administrativePasswordOperation",
+        "description": "Requires a live password management role and recent MFA.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/OperationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/PasswordOperation"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/session/me": {
+      "get": {
+        "operationId": "sessionIdentity",
+        "responses": {
+          "200": {
+            "description": "Current identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Identity"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/session/csrf": {
+      "get": {
+        "operationId": "csrfToken",
+        "responses": {
+          "200": {
+            "description": "CSRF header and token for this browser session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "header_name",
+                    "parameter_name",
+                    "token"
+                  ],
+                  "properties": {
+                    "header_name": {
+                      "type": "string"
+                    },
+                    "parameter_name": {
+                      "type": "string"
+                    },
+                    "token": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/password/change": {
+      "post": {
+        "operationId": "changeOwnPassword",
+        "description": "Recent password authentication is required. Enrolled users and administrators also require recent MFA. Unknown directory results remain fenced and return 202.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Csrf"
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]{16,128}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "old_password",
+                  "new_password",
+                  "confirm_password"
+                ],
+                "properties": {
+                  "old_password": {
+                    "$ref": "#/components/schemas/Password"
+                  },
+                  "new_password": {
+                    "$ref": "#/components/schemas/Password"
+                  },
+                  "confirm_password": {
+                    "$ref": "#/components/schemas/Password"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/PasswordOperation"
+          },
+          "202": {
+            "$ref": "#/components/responses/PasswordOperation"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/password/operations/{id}": {
+      "get": {
+        "operationId": "ownPasswordOperation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/PasswordOperation"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/resource/me": {
+      "get": {
+        "operationId": "resourceIdentity",
+        "security": [
+          {
+            "accessBearer": []
+          }
+        ],
+        "description": "Requires at+jwt, audience unipass-api, scope api.read and live account epoch/gate/family validation. ID tokens are rejected.",
+        "responses": {
+          "200": {
+            "description": "Bearer identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/Identity"
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "client_id"
+                      ],
+                      "properties": {
+                        "client_id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Rejected"
+          },
+          "403": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/mfa": {
+      "get": {
+        "operationId": "mfaStatus",
+        "responses": {
+          "200": {
+            "description": "Factor status only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "enrolled",
+                    "required",
+                    "recent",
+                    "recovery_required"
+                  ],
+                  "properties": {
+                    "enrolled": {
+                      "type": "boolean"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    },
+                    "recent": {
+                      "type": "boolean"
+                    },
+                    "recovery_required": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/mfa/enrollment": {
+      "post": {
+        "operationId": "startTotpEnrollment",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Csrf"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sensitive, one-time display. Confirmation expires after five minutes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "secret",
+                    "otpauthUri",
+                    "expiresAt"
+                  ],
+                  "properties": {
+                    "secret": {
+                      "type": "string",
+                      "description": "Base32 TOTP secret; never log or persist in the browser"
+                    },
+                    "otpauthUri": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/mfa/enrollment/confirm": {
+      "post": {
+        "operationId": "confirmTotpEnrollment",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Csrf"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "code"
+                ],
+                "properties": {
+                  "code": {
+                    "$ref": "#/components/schemas/Otp"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Factor enabled and auth_epoch incremented; password reauthentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "reauthentication_required"
+                  ],
+                  "properties": {
+                    "reauthentication_required": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/mfa/context": {
+      "post": {
+        "operationId": "stepUpContext",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Csrf"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session-owned step-up context",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "context"
+                  ],
+                  "properties": {
+                    "context": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/mfa/challenges": {
+      "post": {
+        "operationId": "createMfaChallenge",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Csrf"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "context"
+                ],
+                "properties": {
+                  "context": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "New five-minute challenge; supersedes previous challenge for this session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "challenge"
+                  ],
+                  "properties": {
+                    "challenge": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/mfa/verify": {
+      "post": {
+        "operationId": "verifyMfaChallenge",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Csrf"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "context",
+                  "challenge",
+                  "code"
+                ],
+                "properties": {
+                  "context": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "challenge": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "code": {
+                    "$ref": "#/components/schemas/Otp"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Challenge and time step consumed; browser session ID rotated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "verified"
+                  ],
+                  "properties": {
+                    "verified": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/password/requests/{key}/operation": {
+      "get": {
+        "operationId": "ownPasswordRequestOperation",
+        "description": "Read-only recovery for a lost password change response. Looks up the never-replayed idempotency key of the original POST; it never resubmits a directory password. Requires an active login and a still-recent real password proof; a revoked login returns 401, a foreign key 404.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Idempotency-Key UUID used by the original /api/password/change request."
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/PasswordOperation"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/password/reset/requests/{key}/operation": {
+      "get": {
+        "operationId": "resetRequestOperation",
+        "description": "Read-only recovery for a lost reset confirmation response. Bound to the browser session that explicitly verified the email proof and to the RESET operation carrying that key; only GET, no secret in URL or storage.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Idempotency-Key UUID used by the original /api/password/reset/confirm request."
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/PasswordOperation"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/portal/continue": {
+      "post": {
+        "operationId": "portalContinue",
+        "description": "Resumes the single validated authorization request stored in the server-written session under a random continuation UUID (10 min expiry, owner-bound). No SavedRequest return URL exists; foreign/expired/consumed continuations reject with 400 or redirect to /portal/?flow_error. Native form POST; CSRF form field plus canonical Origin required.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "id"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "302": {
+            "description": "Redirect to the remaining page (/portal/mfa, /portal/password, /portal/factors) or to the validated /oauth/authorize?target; anonymous continuation invalidation carries only the target across session replacement, never authentication or MFA proof."
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    },
+    "/api/admin/console/audit": [
+      {
+        "get": {
+          "operationId": "listConsoleAudit",
+          "description": "Management console audit query (T8): newest first, stable ties broken by id, opaque Base64url cursor covering created_at and id. Requires ROLE_SYSTEM_ADMIN. detail carries only the allowlisted keys role/reason/login/target_action/replay/operator; response never exposes source_ip.",
+          "parameters": [
+            {
+              "name": "cursor",
+              "in": "query",
+              "schema": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{16,512}$"
+              }
+            },
+            {
+              "name": "limit",
+              "in": "query",
+              "schema": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100,
+                "default": 50
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Page of console audit entries",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/AdminAuditPage"
+                  }
+                }
+              }
+            },
+            "default": {
+              "$ref": "#/components/responses/Rejected"
+            }
+          }
+        }
+      }
+    ],
+    "/api/admin/console/audit/export": [
+      {
+        "get": {
+          "operationId": "exportConsoleAudit",
+          "description": "Audit export as CSV, capped at 1000 rows, same ROLE_SYSTEM_ADMIN requirement. Trace/administrative fields only; columns are treated as static identifiers and cells are defensively filtered.",
+          "responses": {
+            "200": {
+              "description": "CSV, header line created_at,user_id,action,result,client_id,operation_id,trace_id",
+              "content": {
+                "text/csv": {
+                  "schema": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "default": {
+              "$ref": "#/components/responses/Rejected"
+            }
+          }
+        }
+      }
+    ],
+    "/api/admin/console/users/{id}/roles": {
+      "get": {
+        "operationId": "listConsoleRoles",
+        "description": "Current assignable roles of one identity; requires ROLE_SYSTEM_ADMIN. Only role names are returned.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Role name list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      },
+      "post": {
+        "operationId": "changeConsoleRole",
+        "description": "Grant or revoke exactly one allowlisted console role. Requires the operator to hold a recent password and recent MFA; rejections are not audited. Same idempotency key with changed context is rejected (409); the operator cannot remove their own last ROLE_SYSTEM_ADMIN. Grant, role row and audit entry commit in one transaction, so audit failure blocks the change. Idempotency-Key matches [a-zA-Z0-9_-]{16,128}.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]{16,128}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsoleRoleChange"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Role change committed and audited"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        }
+      }
+    }
   },
   "components": {
     "securitySchemes": {
-      "sessionCookie": {"type": "apiKey", "in": "cookie", "name": "UNIPASS_SSO"},
-      "accessBearer": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}
+      "sessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "UNIPASS_SSO"
+      },
+      "accessBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
     },
     "parameters": {
-      "Csrf": {"in": "header", "name": "X-CSRF-TOKEN", "required": true, "schema": {"type": "string"}, "description": "Use header_name and token returned by /api/session/csrf or /api/public/csrf"},
-      "Idempotency": {"in": "header", "name": "Idempotency-Key", "required": true, "schema": {"type": "string", "pattern": "^[a-zA-Z0-9_-]{16,128}$"}},
-      "OperationId": {"in": "path", "name": "id", "required": true, "schema": {"type": "string", "format": "uuid"}}
+      "Csrf": {
+        "in": "header",
+        "name": "X-CSRF-TOKEN",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Use header_name and token returned by /api/session/csrf or /api/public/csrf"
+      },
+      "Idempotency": {
+        "in": "header",
+        "name": "Idempotency-Key",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]{16,128}$"
+        }
+      },
+      "OperationId": {
+        "in": "path",
+        "name": "id",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
     },
     "responses": {
-      "FeishuStart": {"description": "Sensitive one-time flow URL; navigate this browser to the fixed official authorization origin, do not log/persist the URL", "content": {"application/json": {"schema": {"type": "object", "required": ["authorizationUrl"], "properties": {"authorizationUrl": {"type": "string", "format": "uri"}}}}}},
-      "Rejected": {"description": "Rejected request. Browser authentication can return 302 /login, epoch rejection 401, CSRF/MFA denial 403, validation 400, ownership 404, conflicts 409, limits 429 or unavailable state 503. Security filters may return an empty body; business errors include error and trace_id."},
-      "PasswordOperation": {"description": "Non-secret operation status", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PasswordOperation"}}}}
+      "FeishuStart": {
+        "description": "Sensitive one-time flow URL; navigate this browser to the fixed official authorization origin, do not log/persist the URL",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "authorizationUrl"
+              ],
+              "properties": {
+                "authorizationUrl": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Rejected": {
+        "description": "Rejected request. Browser authentication can return 302 /login, epoch rejection 401, CSRF/MFA denial 403, validation 400, ownership 404, conflicts 409, limits 429 or unavailable state 503. Security filters may return an empty body; business errors include error and trace_id."
+      },
+      "PasswordOperation": {
+        "description": "Non-secret operation status",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/PasswordOperation"
+            }
+          }
+        }
+      }
     },
     "schemas": {
-      "LoginPage": {"type": "object", "required": ["entries", "nextCursor"], "properties": {"entries": {"type": "array", "maxItems": 50, "items": {"$ref": "#/components/schemas/LoginEntry"}}, "nextCursor": {"type": ["string", "null"], "format": "uuid"}}},
-      "LoginEntry": {"type": "object", "required": ["id", "authenticatedAt", "lastAccessAt", "method", "device", "current"], "properties": {"id": {"type": "string", "format": "uuid", "description": "Non-credential stable login ID; does not change when the servlet SID rotates."}, "authenticatedAt": {"type": "string", "format": "date-time"}, "lastAccessAt": {"type": "string", "format": "date-time"}, "method": {"type": "string", "enum": ["PASSWORD", "FEISHU"]}, "device": {"type": "string", "maxLength": 80, "description": "Unverified coarse browser and OS category, without version, raw header or IP."}, "current": {"type": "boolean"}}},
-      "RecoveryToken": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43}$", "description": "Sensitive credential; never place in URL query, logs or persistent browser storage"},
-      "NewPassword": {"type": "object", "required": ["new_password", "confirm_password"], "properties": {"new_password": {"$ref": "#/components/schemas/Password"}, "confirm_password": {"$ref": "#/components/schemas/Password"}}},
-      "Identity": {"type": "object", "required": ["sub", "auth_epoch", "login_id", "authenticated_at", "method", "password_recent", "must_change_password", "roles", "mfa"], "properties": {"sub": {"type": "string", "format": "uuid"}, "auth_epoch": {"type": "integer", "format": "int64"}, "login_id": {"type": "string", "format": "uuid", "description": "Stable durable login UUID; revoking it invalidates this browser session and its RP grants."}, "authenticated_at": {"type": "string", "format": "date-time"}, "method": {"type": "string", "enum": ["PASSWORD", "FEISHU"], "description": "Actual authentication source; FEISHU never implies pwd."}, "password_recent": {"type": "boolean", "description": "True within 300s of a real directory password verification; sensitive writes require it."}, "must_change_password": {"type": "boolean"}, "roles": {"type": "array", "items": {"type": "string"}}, "mfa": {"$ref": "#/components/schemas/MfaStatus"}}},
-      "Password": {"type": "string", "writeOnly": true, "minLength": 1, "maxLength": 1024, "description": "Further Unicode complexity and directory policy validation applies"},
-      "Otp": {"type": "string", "writeOnly": true, "pattern": "^[0-9]{6}$"},
-      "PasswordOperation": {"type": "object", "required": ["id", "userId", "state", "fencedEpoch", "createdAt"], "properties": {"id": {"type": "string", "format": "uuid"}, "userId": {"type": "string", "format": "uuid"}, "state": {"type": "string", "enum": ["PREPARED", "COMMITTED", "REJECTED", "UNKNOWN"]}, "fencedEpoch": {"type": "integer", "format": "int64"}, "createdAt": {"type": "string", "format": "date-time"}, "finishedAt": {"type": ["string", "null"], "format": "date-time"}, "errorCode": {"type": ["string", "null"]}}},
-      "MfaStatus": {"type": "object", "required": ["enrolled", "required", "recent", "recovery_required"], "properties": {"enrolled": {"type": "boolean", "description": "An active TOTP factor exists."}, "required": {"type": "boolean"}, "recent": {"type": "boolean", "description": "A recent browser-bound MFA verification is recorded in the IAM session."}, "recovery_required": {"type": "boolean", "description": "Only an independently authorized factor recovery may enroll next."}}},
-      "CsrfProof": {"type": "object", "required": ["header_name", "parameter_name", "token"], "properties": {"header_name": {"type": "string"}, "parameter_name": {"type": "string", "description": "Use this name for HTML login/continuation form fields."}, "token": {"type": "string"}}}
+      "LoginPage": {
+        "type": "object",
+        "required": [
+          "entries",
+          "nextCursor"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/LoginEntry"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "LoginEntry": {
+        "type": "object",
+        "required": [
+          "id",
+          "authenticatedAt",
+          "lastAccessAt",
+          "method",
+          "device",
+          "current"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Non-credential stable login ID; does not change when the servlet SID rotates."
+          },
+          "authenticatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastAccessAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "PASSWORD",
+              "FEISHU"
+            ]
+          },
+          "device": {
+            "type": "string",
+            "maxLength": 80,
+            "description": "Unverified coarse browser and OS category, without version, raw header or IP."
+          },
+          "current": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RecoveryToken": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_-]{43}$",
+        "description": "Sensitive credential; never place in URL query, logs or persistent browser storage"
+      },
+      "NewPassword": {
+        "type": "object",
+        "required": [
+          "new_password",
+          "confirm_password"
+        ],
+        "properties": {
+          "new_password": {
+            "$ref": "#/components/schemas/Password"
+          },
+          "confirm_password": {
+            "$ref": "#/components/schemas/Password"
+          }
+        }
+      },
+      "Identity": {
+        "type": "object",
+        "required": [
+          "sub",
+          "auth_epoch",
+          "login_id",
+          "authenticated_at",
+          "method",
+          "password_recent",
+          "must_change_password",
+          "roles",
+          "mfa"
+        ],
+        "properties": {
+          "sub": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "auth_epoch": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "login_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable durable login UUID; revoking it invalidates this browser session and its RP grants."
+          },
+          "authenticated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "PASSWORD",
+              "FEISHU"
+            ],
+            "description": "Actual authentication source; FEISHU never implies pwd."
+          },
+          "password_recent": {
+            "type": "boolean",
+            "description": "True within 300s of a real directory password verification; sensitive writes require it."
+          },
+          "must_change_password": {
+            "type": "boolean"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "mfa": {
+            "$ref": "#/components/schemas/MfaStatus"
+          }
+        }
+      },
+      "Password": {
+        "type": "string",
+        "writeOnly": true,
+        "minLength": 1,
+        "maxLength": 1024,
+        "description": "Further Unicode complexity and directory policy validation applies"
+      },
+      "Otp": {
+        "type": "string",
+        "writeOnly": true,
+        "pattern": "^[0-9]{6}$"
+      },
+      "PasswordOperation": {
+        "type": "object",
+        "required": [
+          "id",
+          "userId",
+          "state",
+          "fencedEpoch",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "PREPARED",
+              "COMMITTED",
+              "REJECTED",
+              "UNKNOWN"
+            ]
+          },
+          "fencedEpoch": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "errorCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "MfaStatus": {
+        "type": "object",
+        "required": [
+          "enrolled",
+          "required",
+          "recent",
+          "recovery_required"
+        ],
+        "properties": {
+          "enrolled": {
+            "type": "boolean",
+            "description": "An active TOTP factor exists."
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "recent": {
+            "type": "boolean",
+            "description": "A recent browser-bound MFA verification is recorded in the IAM session."
+          },
+          "recovery_required": {
+            "type": "boolean",
+            "description": "Only an independently authorized factor recovery may enroll next."
+          }
+        }
+      },
+      "CsrfProof": {
+        "type": "object",
+        "required": [
+          "header_name",
+          "parameter_name",
+          "token"
+        ],
+        "properties": {
+          "header_name": {
+            "type": "string"
+          },
+          "parameter_name": {
+            "type": "string",
+            "description": "Use this name for HTML login/continuation form fields."
+          },
+          "token": {
+            "type": "string"
+          }
+        }
+      },
+      "AdminAuditPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entries",
+          "nextCursor"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/AdminAuditEntry"
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "AdminAuditEntry": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "createdAt",
+          "subject",
+          "action",
+          "result",
+          "clientId",
+          "operationId",
+          "detail"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "subject": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "action": {
+            "type": "string",
+            "pattern": "^[A-Z_]{1,64}$"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "SUCCESS",
+              "REJECTED",
+              "UNAVAILABLE"
+            ]
+          },
+          "clientId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100
+          },
+          "operationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "detail": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Allowlisted keys: role, reason, login, target_action, replay, operator. Unknown keys never reach storage."
+          }
+        }
+      },
+      "ConsoleRoleChange": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "role",
+          "reason"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "GRANT",
+              "REVOKE"
+            ]
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "ROLE_SYSTEM_ADMIN",
+              "ROLE_ADMIN_PASSWORD_RESET",
+              "ROLE_ADMIN_PASSWORD_RECOVERY",
+              "ROLE_ADMIN_MFA_RECOVERY"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Free-text business reason; ISO control characters are rejected."
+          }
+        }
+      }
     }
   }
 }

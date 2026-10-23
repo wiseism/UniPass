@@ -13,7 +13,7 @@ public final class PortalPages {
     private final PortalContinuations continuations;
     public PortalPages(PortalContinuations continuations){this.continuations=continuations;}
     @GetMapping("/") String root(){return "redirect:/portal/";}
-    @GetMapping(value={"/login","/reset","/portal/","/portal/mfa","/portal/password","/portal/factors","/portal/sessions","/portal/binding"},produces=MediaType.TEXT_HTML_VALUE)
+    @GetMapping(value={"/login","/reset","/portal/","/portal/mfa","/portal/password","/portal/factors","/portal/sessions","/portal/binding","/portal/admin"},produces=MediaType.TEXT_HTML_VALUE)
     ResponseEntity<Resource> page(){
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).header("Referrer-Policy","same-origin").body(new ClassPathResource("META-INF/resources/portal/index.html"));
     }

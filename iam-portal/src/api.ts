@@ -1,11 +1,13 @@
 export interface Csrf { header_name: string; parameter_name: string; token: string }
 export interface MfaStatus { enrolled: boolean; required: boolean; recent: boolean; recovery_required: boolean }
-export interface Identity { sub: string; auth_epoch: number; login_id: string; method: string; password_recent: boolean; must_change_password: boolean; authenticated_at: string; mfa: MfaStatus }
+export interface Identity { sub: string; auth_epoch: number; login_id: string; method: string; password_recent: boolean; must_change_password: boolean; authenticated_at: string; roles?: string[]; mfa: MfaStatus }
 export interface PasswordOperation { id: string; state: 'PREPARED' | 'UNKNOWN' | 'COMMITTED' | 'REJECTED'; errorCode?: string }
 export interface Enrollment { secret: string; otpauthUri: string; expiresAt: string }
 export interface Replacement extends Enrollment { id: string }
 export interface LoginEntry { id: string; authenticatedAt: string; lastAccessAt: string; method: string; device: string; current: boolean }
 export interface LoginPage { entries: LoginEntry[]; nextCursor: string | null }
+export interface AdminAuditEntry { id: string; createdAt: string; subject: string | null; action: string; result: string; clientId: string | null; operationId: string | null; detail: Record<string, string> }
+export interface AdminAuditPage { entries: AdminAuditEntry[]; nextCursor: string | null }
 
 export const isUuid = (value: unknown): value is string => typeof value === 'string' && /^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}$/i.test(value)
 export class ApiFailure extends Error {
@@ -50,8 +52,12 @@ export async function logout(): Promise<void> {
   if (response.type !== 'opaqueredirect' && response.status !== 302) throw new ApiFailure(response.status)
   window.location.assign('/login?logout')
 }
-export function message(error: unknown): string {
-  if (!(error instanceof ApiFailure)) return '暂时无法完成操作，请稍后重试。'
+/** Opaque server cursor guard: only validated base64url shapes are ever sent back. */
+export function assertCursor(cursor: string | null | undefined): void {
+  if (cursor === null || cursor === undefined) return
+  if (!/^[A-Za-z0-9_-]{16,512}$/.test(cursor)) throw new ApiFailure(400)
+}
+export function message(error: unknown): string {  if (!(error instanceof ApiFailure)) return '暂时无法完成操作，请稍后重试。'
   const known: Record<string, string> = {
     POLICY_REJECTED: '新密码未满足安全策略，请检查长度、字符组合以及是否包含个人信息。',
     OLD_PASSWORD_INCORRECT: '当前密码验证失败，请重新输入。',

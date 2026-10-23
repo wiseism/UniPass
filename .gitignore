@@ -53,10 +53,7 @@ build
 .Spotlight-V100/
 .Trashes/
 
-# Gradle bootstrap binary is part of the reproducible build.
-!gradle/wrapper/gradle-wrapper.jar
-
-# iam-portal 前端模块：依赖由 npm ci 严格恢复，工具链与本地产物不入库。
+# Frontend and local browser evidence
 **/node_modules/
 /output/
 /.playwright-cli/

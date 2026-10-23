@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { Component } from 'vue'
-import { logout, message } from './api'
+import { get, logout, message } from './api'
 import LoginPage from './pages/LoginPage.vue'
 import OverviewPage from './pages/OverviewPage.vue'
 import MfaPage from './pages/MfaPage.vue'
@@ -10,9 +10,14 @@ import ResetPage from './pages/ResetPage.vue'
 import SessionsPage from './pages/SessionsPage.vue'
 import FactorsPage from './pages/FactorsPage.vue'
 import BindingPage from './pages/BindingPage.vue'
+import AdminPage from './pages/AdminPage.vue'
 const path = window.location.pathname; const publicPage = path === '/login' || path === '/reset'
-const pages: Record<string, Component> = { '/login': LoginPage, '/reset': ResetPage, '/portal/': OverviewPage, '/portal/mfa': MfaPage, '/portal/password': PasswordPage, '/portal/sessions': SessionsPage, '/portal/factors': FactorsPage, '/portal/binding': BindingPage }
-const links = [{ path: '/portal/', name: '账户概览' }, { path: '/portal/password', name: '账户密码' }, { path: '/portal/mfa', name: '身份验证' }, { path: '/portal/factors', name: '验证器' }, { path: '/portal/sessions', name: '登录管理' }, { path: '/portal/binding', name: '飞书绑定' }]
+const pages: Record<string, Component> = { '/login': LoginPage, '/reset': ResetPage, '/portal/': OverviewPage, '/portal/mfa': MfaPage, '/portal/password': PasswordPage, '/portal/sessions': SessionsPage, '/portal/factors': FactorsPage, '/portal/binding': BindingPage, '/portal/admin': AdminPage }
+const links = ref([{ path: '/portal/', name: '账户概览' }, { path: '/portal/password', name: '账户密码' }, { path: '/portal/mfa', name: '身份验证' }, { path: '/portal/factors', name: '验证器' }, { path: '/portal/sessions', name: '登录管理' }, { path: '/portal/binding', name: '飞书绑定' }])
+// The console entry is only surfaced to operators; the server re-checks the role.
+if (!publicPage) void get<{ roles?: string[] }>('/api/session/me').then(value => {
+  if (value.roles?.includes('ROLE_SYSTEM_ADMIN')) links.value = [...links.value, { path: '/portal/admin', name: '管理控制台' }]
+}).catch(() => { /* portal pages handle their own 401 recovery */ })
 const error = ref(''); const busy = ref(false); const flowError = new URLSearchParams(window.location.search).has('flow_error')
 async function exit() { if (busy.value) return; busy.value = true; error.value = ''; try { await logout() } catch (failure) { error.value = message(failure); busy.value = false } }
 </script>
