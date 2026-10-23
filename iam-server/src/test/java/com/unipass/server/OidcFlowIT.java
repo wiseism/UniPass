@@ -627,7 +627,7 @@ class OidcFlowIT {
         assertTrue(asset.find(),"no local asset referenced: "+shell.body());
         var contents=browser().send(HttpRequest.newBuilder(uri(asset.group(1))).GET().build(),HttpResponse.BodyHandlers.ofString());
         assertEquals(200,contents.statusCode(),asset.group(1));
-        assertTrue(contents.headers().firstValue("Content-Type").orElse("").matches("(?:application/.*javascript|text/css).*"),contents.headers().firstValue("Content-Type").orElse(""));
+        assertTrue(contents.headers().firstValue("Content-Type").orElse("").matches("(?:(?:text|application)/javascript|text/css)(?:;.*)?"),contents.headers().firstValue("Content-Type").orElse(""));
         assertEquals(404,html(browser(),"/portal/assets/missing-never-built.js").statusCode());
     }
     @Test void everyBrowserWriteRejectsMissingForeignNullOrRepeatedOriginBeforeMutation()throws Exception{
